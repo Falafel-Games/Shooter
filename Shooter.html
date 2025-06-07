@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <title>Falafel Games | Shooter</title>
+  <link rel="icon" href="Shooter.png" type="png">
+  <style>
+    body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+    canvas { display: block; }
+    #score {
+      position: fixed;
+      top: 10px; right: 10px;
+      color: #fff;
+      font-size: 24px;
+      background: rgba(0,0,0,0.5);
+      padding: 8px 15px;
+      border-radius: 8px;
+      user-select: none;
+      z-index: 100;
+    }
+    #instructions {
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-size: 20px;
+      background: rgba(0,0,0,0.7);
+      padding: 20px 30px;
+      border-radius: 10px;
+      cursor: pointer;
+      user-select: none;
+      z-index: 101;
+    }
+    #crosshair {
+      position: fixed;
+      top: 50%; left: 50%;
+      width: 20px; height: 20px;
+      transform: translate(-50%, -50%);
+      z-index: 100;
+      display: none;
+      pointer-events: none;
+    }
+    #crosshair::before, #crosshair::after {
+      content: '';
+      position: absolute;
+      background: #ff0000;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+    }
+    #crosshair::before {
+      width: 2px; height: 20px;
+    }
+    #crosshair::after {
+      width: 20px; height: 2px;
+    }
+  </style>
+</head>
+<body>
+<div id="score">النقاط: 0 | أعلى نقاط: 0</div>
+<div id="instructions">انقر هنا لبدء اللعب وفتح تحكم الماوس</div>
+<div id="crosshair"></div>
+
+<script type="module">
+  import * as THREE from 'https://esm.sh/three@0.152.2';
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x87ceeb);
+
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 2, 5);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  document.body.appendChild(renderer.domElement);
+
+  const sunLight = new THREE.DirectionalLight(0xfff5e1, 1.5);
+  sunLight.position.set(10, 20, 10);
+  sunLight.castShadow = true;
+  scene.add(sunLight);
+
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+  scene.add(ambientLight);
+
+  const floorGeometry = new THREE.PlaneGeometry(50, 50);
+  const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x228833 });
+  const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  scene.add(floor);
+
+  const player = new THREE.Group();
+  player.position.y = 0.75;
+  scene.add(player);
+
+  const bodyGeometry = new THREE.BoxGeometry(0.5, 1.5, 0.3);
+  const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0x5555ff });
+  const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+  body.castShadow = true;
+  player.add(body);
+
+  const rpgGeometry = new THREE.CylinderGeometry(0.05, 0.05, 1, 16);
+  const rpgMaterial = new THREE.MeshStandardMaterial({ color: 0x882222 });
+  const rpg = new THREE.Mesh(rpgGeometry, rpgMaterial);
+  rpg.rotation.z = Math.PI / 2;
+  rpg.position.set(-0.25, 1.1, 0.15);
+  player.add(rpg);
+
+  let pointerLocked = false;
+  const instructions = document.getElementById('instructions');
+  const crosshair = document.getElementById('crosshair');
+  const scoreDiv = document.getElementById('score');
+
+  instructions.addEventListener('click', () => {
+    renderer.domElement.requestPointerLock();
+  });
+
+  document.addEventListener('pointerlockchange', () => {
+    pointerLocked = (document.pointerLockElement === renderer.domElement);
+    instructions.style.display = pointerLocked ? 'none' : 'block';
+    crosshair.style.display = pointerLocked ? 'block' : 'none';
+  });
+
+  let yaw = 0;
+  let pitch = 0;
+  const pitchLimit = Math.PI / 3;
+  const sensitivity = 0.002;
+
+  window.addEventListener('mousemove', e => {
+    if (!pointerLocked) return;
+    yaw -= e.movementX * sensitivity;
+    pitch -= e.movementY * sensitivity;
+    pitch = Math.max(-pitchLimit, Math.min(pitchLimit, pitch));
+  });
+
+  const keys = { forward: false, backward: false, left: false, right: false };
+  window.addEventListener('keydown', e => {
+    switch (e.key.toLowerCase()) {
+      case 'w': case 'arrowup': keys.forward = true; break;
+      case 's': case 'arrowdown': keys.backward = true; break;
+      case 'a': case 'arrowleft': keys.left = true; break;
+      case 'd': case 'arrowright': keys.right = true; break;
+    }
+  });
+  window.addEventListener('keyup', e => {
+    switch (e.key.toLowerCase()) {
+      case 'w': case 'arrowup': keys.forward = false; break;
+      case 's': case 'arrowdown': keys.backward = false; break;
+      case 'a': case 'arrowleft': keys.left = false; break;
+      case 'd': case 'arrowright': keys.right = false; break;
+    }
+  });
+
+  const targets = [];
+  const targetGeometry = new THREE.SphereGeometry(0.5, 16, 16);
+  const targetMaterial = new THREE.MeshStandardMaterial({ color: 0x008800 });
+
+  function createTarget(position) {
+    const target = new THREE.Mesh(targetGeometry, targetMaterial);
+    target.position.copy(position);
+    target.castShadow = true;
+    scene.add(target);
+    targets.push(target);
+  }
+
+  function spawnTargets(count = 5) {
+    for (let i = 0; i < count; i++) {
+      const x = (Math.random() - 0.5) * 30;
+      const z = (Math.random() - 0.5) * 30;
+      createTarget(new THREE.Vector3(x, 0.5, z));
+    }
+  }
+  spawnTargets();
+
+  let score = 0;
+  let highScore = localStorage.getItem('highScore') || 0;
+
+  function updateScore(points) {
+    score += points;
+    if (score > highScore) {
+      highScore = score;
+      localStorage.setItem('highScore', highScore);
+    }
+    scoreDiv.textContent = `النقاط: ${score} | أعلى نقاط: ${highScore}`;
+  }
+
+  const rockets = [];
+  const rocketGeometry = new THREE.CylinderGeometry(0.05, 0.05, 0.5, 12);
+  const rocketMaterial = new THREE.MeshStandardMaterial({ color: 0xff2222 });
+
+  function createRocket() {
+    const rocket = new THREE.Mesh(rocketGeometry, rocketMaterial);
+    rocket.rotation.x = Math.PI / 2;
+    rocket.position.copy(camera.position);
+    rocket.position.y -= 0.3;
+    rocket.castShadow = true;
+
+    const direction = new THREE.Vector3(0, 0, -1);
+    direction.applyEuler(camera.rotation);
+    rocket.userData = { direction };
+    scene.add(rocket);
+    rockets.push(rocket);
+  }
+
+  window.addEventListener('mousedown', (e) => {
+    if (pointerLocked && e.button === 0) {
+      createRocket();
+    }
+  });
+
+  const rocketSpeed = 25;
+  function updateRockets(delta) {
+    for (let i = rockets.length - 1; i >= 0; i--) {
+      const rocket = rockets[i];
+      rocket.position.addScaledVector(rocket.userData.direction, rocketSpeed * delta);
+
+      for (let j = targets.length - 1; j >= 0; j--) {
+        const target = targets[j];
+        const dist = rocket.position.distanceTo(target.position);
+        if (dist < 0.6) {
+          scene.remove(target);
+          targets.splice(j, 1);
+
+          scene.remove(rocket);
+          rockets.splice(i, 1);
+
+          updateScore(10);
+          spawnTargets(1);
+          break;
+        }
+      }
+
+      if (rocket.position.length() > 100) {
+        scene.remove(rocket);
+        rockets.splice(i, 1);
+      }
+    }
+  }
+
+  const playerSpeed = 6;
+  function updatePlayer(delta) {
+    camera.rotation.order = 'YXZ';
+    camera.rotation.y = yaw;
+    camera.rotation.x = pitch;
+
+    const direction = new THREE.Vector3();
+    const forward = new THREE.Vector3();
+    const right = new THREE.Vector3();
+
+    camera.getWorldDirection(forward);
+    forward.y = 0;
+    forward.normalize();
+
+    right.crossVectors(forward, camera.up).normalize();
+
+    if (keys.forward) direction.add(forward);
+    if (keys.backward) direction.sub(forward);
+    if (keys.right) direction.add(right);
+    if (keys.left) direction.sub(right);
+
+    if ("W") direction.add(forward);
+    if ("S") direction.sub(forward);
+    if ("A") direction.add(right);
+    if ("D") direction.sub(right);
+
+    if (direction.length() > 0) {
+      direction.normalize();
+      player.position.addScaledVector(direction, playerSpeed * delta);
+    }
+
+    camera.position.copy(player.position);
+    camera.position.y += 1.5;
+  }
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  const clock = new THREE.Clock();
+  function animate() {
+    const delta = clock.getDelta();
+    updatePlayer(delta);
+    updateRockets(delta);
+    renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+  }
+  animate();
+</script>
+</body>
+</html>
